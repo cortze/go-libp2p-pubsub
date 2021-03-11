@@ -137,6 +137,10 @@ type PubSub struct {
 	inboundStreamsMx sync.Mutex
 	inboundStreams   map[peer.ID]network.Stream
 
+	// MODIFICATION
+	// Seen Filter to check if the messages has to be stopped from bringing them up to the application
+	seenFilter bool
+
 	seenMessagesMx sync.Mutex
 	seenMessages   *timecache.TimeCache
 
@@ -299,6 +303,19 @@ func NewPubSub(ctx context.Context, h host.Host, rt PubSubRouter, opts ...Option
 	(*PubSubNotif)(ps).Initialize()
 
 	return ps, nil
+}
+
+// Func that enables or not the MarkAsSeenFilter, getting a notification of every msg that we receive from the peers over a subscribed topic
+func WithSeenFilter(enabled bool) Option {
+	return func(p *PubSub) error {
+		if enabled {
+			p.seenFilter = true
+		} else {
+			p.seenFilter = false
+		}
+		fmt.Println("The Message Seen Filter has been set to:", p.seenFilter)
+		return nil
+	}
 }
 
 // MsgIdFunction returns a unique ID for the passed Message, and PubSub can be customized to use any
@@ -1041,6 +1058,11 @@ func (p *PubSub) pushMsg(msg *Message) {
 	id := p.msgID(msg.Message)
 	if p.seenMessage(id) {
 		p.tracer.DuplicateMessage(msg)
+		// I the Seen Filter has been disabled, we will still notify the app that a new message was received
+		if !p.seenFilter {
+			log.Debugf("Message that we already saw received from %s", src)
+			p.notifySubs(msg)
+		}
 		return
 	}
 
