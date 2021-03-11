@@ -155,6 +155,9 @@ type PubSub struct {
 	seenMessages    timecache.TimeCache
 	seenMsgTTL      time.Duration
 	seenMsgStrategy timecache.Strategy
+	// MODIFICATION
+	// forwardSeenFilter to check if previously seen messages need to be forwareded to the application layer
+	forwardSeenFilter bool
 
 	// generator used to compute the ID for a message
 	idGen *msgIDGenerator
@@ -336,6 +339,19 @@ func NewPubSub(ctx context.Context, h host.Host, rt PubSubRouter, opts ...Option
 	(*PubSubNotif)(ps).Initialize()
 
 	return ps, nil
+}
+
+// Func that enables or not the MarkAsSeenFilter, getting a notification of every msg that we receive from the peers over a subscribed topic
+func WithSeenFilter(enabled bool) Option {
+	return func(p *PubSub) error {
+		if enabled {
+			p.forwardSeenFilter = true
+		} else {
+			p.forwardSeenFilter = false
+		}
+		fmt.Println("The Message Seen Filter has been set to:", p.forwardSeenFilter)
+		return nil
+	}
 }
 
 // MsgIdFunction returns a unique ID for the passed Message, and PubSub can be customized to use any
@@ -1149,6 +1165,11 @@ func (p *PubSub) pushMsg(msg *Message) {
 	id := p.idGen.ID(msg)
 	if p.seenMessage(id) {
 		p.tracer.DuplicateMessage(msg)
+		// I the Seen Filter has been disabled, we will still notify the app that a new message was received
+		if p.forwardSeenFilter {
+			log.Debugf("Message that we already saw received from %s", src)
+			p.notifySubs(msg)
+		}
 		return
 	}
 
