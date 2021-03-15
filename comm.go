@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"io"
+	"time"
 
 	"github.com/libp2p/go-libp2p-core/helpers"
 	"github.com/libp2p/go-libp2p-core/network"
@@ -59,6 +60,7 @@ func (p *PubSub) handleNewStream(s network.Stream) {
 		}
 
 		rpc.from = s.Conn().RemotePeer()
+		rpc.arrivalTime = time.Now()
 		select {
 		case p.incoming <- rpc:
 		case <-p.ctx.Done():

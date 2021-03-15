@@ -134,7 +134,7 @@ type PubSub struct {
 
 	peers map[peer.ID]chan *RPC
 
-    // MODIFICATION
+	// MODIFICATION
 	// Seen Filter to check if the messages has to be stopped from bringing them up to the application
 	seenFilter bool
 
@@ -190,6 +190,7 @@ type PubSubRouter interface {
 type Message struct {
 	*pb.Message
 	ReceivedFrom  peer.ID
+	ArrivalTime   time.Time
 	ValidatorData interface{}
 }
 
@@ -197,11 +198,19 @@ func (m *Message) GetFrom() peer.ID {
 	return peer.ID(m.Message.GetFrom())
 }
 
+func (m *Message) GetArrivalTime() time.Time {
+	return m.ArrivalTime
+}
+
 type RPC struct {
 	pb.RPC
 
 	// unexported on purpose, not sending this over the wire
 	from peer.ID
+
+	// MODIFICATION -
+	// Include the Timestamp where the msg was received
+	arrivalTime time.Time
 }
 
 type Option func(*PubSub) error
@@ -951,7 +960,7 @@ func (p *PubSub) handleIncomingRPC(rpc *RPC) {
 			continue
 		}
 
-		msg := &Message{pmsg, rpc.from, nil}
+		msg := &Message{pmsg, rpc.from, rpc.arrivalTime, nil}
 		p.pushMsg(msg)
 	}
 
@@ -1027,7 +1036,7 @@ func (p *PubSub) pushMsg(msg *Message) {
 			log.Debugf("Message that we already saw received from %s", src)
 			p.notifySubs(msg)
 		}
-        return
+		return
 	}
 
 	if !p.val.Push(src, msg) {

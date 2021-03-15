@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	pb "github.com/libp2p/go-libp2p-pubsub/pb"
 
@@ -195,7 +196,7 @@ func (t *Topic) Publish(ctx context.Context, data []byte, opts ...PubOpt) error 
 	}
 
 	select {
-	case t.p.publish <- &Message{m, t.p.host.ID(), nil}:
+	case t.p.publish <- &Message{m, t.p.host.ID(), time.Now(), nil}:
 	case <-t.p.ctx.Done():
 		return t.p.ctx.Err()
 	}
