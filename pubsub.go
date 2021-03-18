@@ -191,6 +191,7 @@ type Message struct {
 	*pb.Message
 	ReceivedFrom  peer.ID
 	ArrivalTime   time.Time
+	MessageID     string
 	ValidatorData interface{}
 }
 
@@ -200,6 +201,10 @@ func (m *Message) GetFrom() peer.ID {
 
 func (m *Message) GetArrivalTime() time.Time {
 	return m.ArrivalTime
+}
+
+func (m *Message) GetMessageID() string {
+	return m.MessageID
 }
 
 type RPC struct {
@@ -960,7 +965,8 @@ func (p *PubSub) handleIncomingRPC(rpc *RPC) {
 			continue
 		}
 
-		msg := &Message{pmsg, rpc.from, rpc.arrivalTime, nil}
+		id := p.msgID(pmsg)
+		msg := &Message{pmsg, rpc.from, rpc.arrivalTime, id, nil}
 		p.pushMsg(msg)
 	}
 
