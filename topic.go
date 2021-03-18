@@ -196,7 +196,7 @@ func (t *Topic) Publish(ctx context.Context, data []byte, opts ...PubOpt) error 
 	}
 
 	select {
-	case t.p.publish <- &Message{m, t.p.host.ID(), time.Now(), nil}:
+	case t.p.publish <- &Message{m, t.p.host.ID(), time.Now(), t.p.msgID(m), nil}:
 	case <-t.p.ctx.Done():
 		return t.p.ctx.Err()
 	}
