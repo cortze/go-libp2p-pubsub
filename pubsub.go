@@ -63,6 +63,10 @@ type PubSub struct {
 	// topics.
 	maxMessageSize int
 
+	// MODIFICATION
+	// Seen Filter to check if the messages has to be stopped from bringing them up to the application
+	seenFilter bool
+
 	// size of the outbound message channel that we maintain for each peer
 	peerOutboundQueueSize int
 
@@ -121,7 +125,8 @@ type PubSub struct {
 	myTopics map[string]*Topic
 
 	// topics tracks which topics each of our peers are subscribed to
-	topics map[string]map[peer.ID]struct{}
+	topicsMx sync.RWMutex
+	topics   map[string]map[peer.ID]struct{}
 
 	// sendMsg handles messages that have been validated
 	sendMsg chan *Message
@@ -143,10 +148,6 @@ type PubSub struct {
 
 	inboundStreamsMx sync.Mutex
 	inboundStreams   map[peer.ID]network.Stream
-
-	// MODIFICATION
-	// Seen Filter to check if the messages has to be stopped from bringing them up to the application
-	seenFilter bool
 
 	seenMessagesMx sync.Mutex
 	seenMessages   *timecache.TimeCache
@@ -218,6 +219,7 @@ const (
 type Message struct {
 	*pb.Message
 	ID            string
+	ArrivalTime   time.Time
 	ReceivedFrom  peer.ID
 	ValidatorData interface{}
 }
@@ -230,7 +232,8 @@ type RPC struct {
 	pb.RPC
 
 	// unexported on purpose, not sending this over the wire
-	from peer.ID
+	from        peer.ID
+	ArrivalTime time.Time
 }
 
 type Option func(*PubSub) error
@@ -320,19 +323,6 @@ func NewPubSub(ctx context.Context, h host.Host, rt PubSubRouter, opts ...Option
 	(*PubSubNotif)(ps).Initialize()
 
 	return ps, nil
-}
-
-// Func that enables or not the MarkAsSeenFilter, getting a notification of every msg that we receive from the peers over a subscribed topic
-func WithSeenFilter(enabled bool) Option {
-	return func(p *PubSub) error {
-		if enabled {
-			p.seenFilter = true
-		} else {
-			p.seenFilter = false
-		}
-		fmt.Println("The Message Seen Filter has been set to:", p.seenFilter)
-		return nil
-	}
 }
 
 // MsgIdFunction returns a unique ID for the passed Message, and PubSub can be customized to use any
@@ -488,6 +478,19 @@ func WithRawTracer(tracer RawTracer) Option {
 	}
 }
 
+// Func that enables or not the MarkAsSeenFilter, getting a notification of every msg that we receive from the peers over a subscribed topic
+func WithSeenFilter(enabled bool) Option {
+	return func(p *PubSub) error {
+		if enabled {
+			p.seenFilter = true
+		} else {
+			p.seenFilter = false
+		}
+		fmt.Println("The Message Seen Filter has been set to:", p.seenFilter)
+		return nil
+	}
+}
+
 // WithMaxMessageSize sets the global maximum message size for pubsub wire
 // messages. The default value is 1MiB (DefaultMaxMessageSize).
 //
@@ -525,6 +528,19 @@ func WithProtocolMatchFn(m ProtocolMatchFn) Option {
 		ps.protoMatchFunc = m
 		return nil
 	}
+}
+
+func (p *PubSub) TopicsPerPeer() map[string]int {
+	p.topicsMx.RLock()
+	defer p.topicsMx.RUnlock()
+	topicPeers := make(map[string]int, 0)
+	for top, peers := range p.topics {
+		_, ok := p.myTopics[top]
+		if ok {
+			topicPeers[top] = len(peers)
+		}
+	}
+	return topicPeers
 }
 
 // processLoop handles all inputs arriving on the channels
@@ -1060,8 +1076,7 @@ func (p *PubSub) handleIncomingRPC(rpc *RPC) {
 				log.Debug("received message in topic we didn't subscribe to; ignoring message")
 				continue
 			}
-
-			p.pushMsg(&Message{pmsg, "", rpc.from, nil})
+			p.pushMsg(&Message{pmsg, "", rpc.ArrivalTime, rpc.from, nil})
 		}
 	}
 
@@ -1113,7 +1128,6 @@ func (p *PubSub) pushMsg(msg *Message) {
 	id := p.idGen.ID(msg)
 	if p.seenMessage(id) {
 		p.tracer.DuplicateMessage(msg)
-		// I the Seen Filter has been disabled, we will still notify the app that a new message was received
 		if !p.seenFilter {
 			log.Debugf("Message that we already saw received from %s", src)
 			p.notifySubs(msg)
@@ -1181,14 +1195,6 @@ type rmTopicReq struct {
 type TopicOptions struct{}
 
 type TopicOpt func(t *Topic) error
-
-// WithTopicMessageIdFn sets custom MsgIdFunction for a Topic, enabling topics to have own msg id generation rules.
-func WithTopicMessageIdFn(msgId MsgIdFunction) TopicOpt {
-	return func(t *Topic) error {
-		t.p.idGen.Set(t.topic, msgId)
-		return nil
-	}
-}
 
 // Join joins the topic and returns a Topic handle. Only one Topic handle should exist per topic, and Join will error if
 // the Topic handle already exists.
