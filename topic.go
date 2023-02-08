@@ -307,7 +307,6 @@ func (t *Topic) Publish(ctx context.Context, data []byte, opts ...PubOpt) error 
 			}
 		}
 	}
-
 	return t.p.val.PushLocal(&Message{m, "", time.Now(), t.p.host.ID(), nil, pub.local})
 }
 

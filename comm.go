@@ -63,7 +63,10 @@ func (p *PubSub) handleNewStream(s network.Stream) {
 
 	r := msgio.NewVarintReaderSize(s, p.maxMessageSize)
 	for {
+
 		msgbytes, err := r.ReadMsg()
+		t := time.Now()
+
 		if err != nil {
 			r.ReleaseMsg(msgbytes)
 			if err != io.EOF {
@@ -88,6 +91,7 @@ func (p *PubSub) handleNewStream(s network.Stream) {
 		}
 
 		rpc.from = peer
+		rpc.ArrivalTime = t
 		select {
 		case p.incoming <- rpc:
 		case <-p.ctx.Done():
