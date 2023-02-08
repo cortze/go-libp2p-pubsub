@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"io"
+	"time"
 
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -63,6 +64,7 @@ func (p *PubSub) handleNewStream(s network.Stream) {
 	for {
 		rpc := new(RPC)
 		err := r.ReadMsg(&rpc.RPC)
+		t := time.Now()
 		if err != nil {
 			if err != io.EOF {
 				s.Reset()
@@ -77,6 +79,7 @@ func (p *PubSub) handleNewStream(s network.Stream) {
 		}
 
 		rpc.from = peer
+		rpc.ArrivalTime = t
 		select {
 		case p.incoming <- rpc:
 		case <-p.ctx.Done():
