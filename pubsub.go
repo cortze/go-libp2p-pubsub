@@ -129,7 +129,8 @@ type PubSub struct {
 	myTopics map[string]*Topic
 
 	// topics tracks which topics each of our peers are subscribed to
-	topics map[string]map[peer.ID]struct{}
+	topicsMx sync.RWMutex
+	topics   map[string]map[peer.ID]struct{}
 
 	// sendMsg handles messages that have been validated
 	sendMsg chan *Message
@@ -232,6 +233,7 @@ const (
 type Message struct {
 	*pb.Message
 	ID            string
+	ArrivalTime   time.Time
 	ReceivedFrom  peer.ID
 	ValidatorData interface{}
 	Local         bool
@@ -245,7 +247,8 @@ type RPC struct {
 	pb.RPC
 
 	// unexported on purpose, not sending this over the wire
-	from peer.ID
+	from        peer.ID
+	ArrivalTime time.Time
 }
 
 type Option func(*PubSub) error
@@ -342,7 +345,7 @@ func NewPubSub(ctx context.Context, h host.Host, rt PubSubRouter, opts ...Option
 }
 
 // Func that enables or not the MarkAsSeenFilter, getting a notification of every msg that we receive from the peers over a subscribed topic
-func WithSeenFilter(enabled bool) Option {
+func WithForwardSeenFilter(enabled bool) Option {
 	return func(p *PubSub) error {
 		if enabled {
 			p.forwardSeenFilter = true
@@ -546,6 +549,14 @@ func WithProtocolMatchFn(m ProtocolMatchFn) Option {
 	}
 }
 
+// WithTopicMessageIdFn sets custom MsgIdFunction for a Topic, enabling topics to have own msg id generation rules.
+func WithTopicMessageIdFn(msgId MsgIdFunction) TopicOpt {
+	return func(t *Topic) error {
+		t.p.idGen.Set(t.topic, msgId)
+		return nil
+	}
+}
+
 // WithSeenMessagesTTL configures when a previously seen message ID can be forgotten about
 func WithSeenMessagesTTL(ttl time.Duration) Option {
 	return func(ps *PubSub) error {
@@ -571,6 +582,19 @@ func WithAppSpecificRpcInspector(inspector func(peer.ID, *RPC) error) Option {
 		ps.appSpecificRpcInspector = inspector
 		return nil
 	}
+}
+
+func (p *PubSub) TopicsPerPeer() map[string]int {
+	p.topicsMx.RLock()
+	defer p.topicsMx.RUnlock()
+	topicPeers := make(map[string]int, 0)
+	for top, peers := range p.topics {
+		_, ok := p.myTopics[top]
+		if ok {
+			topicPeers[top] = len(peers)
+		}
+	}
+	return topicPeers
 }
 
 // processLoop handles all inputs arriving on the channels
@@ -1112,8 +1136,7 @@ func (p *PubSub) handleIncomingRPC(rpc *RPC) {
 				log.Debug("received message in topic we didn't subscribe to; ignoring message")
 				continue
 			}
-
-			p.pushMsg(&Message{pmsg, "", rpc.from, nil, false})
+			p.pushMsg(&Message{pmsg, "", rpc.ArrivalTime, rpc.from, nil, false})
 		}
 	}
 
@@ -1235,14 +1258,6 @@ type rmTopicReq struct {
 type TopicOptions struct{}
 
 type TopicOpt func(t *Topic) error
-
-// WithTopicMessageIdFn sets custom MsgIdFunction for a Topic, enabling topics to have own msg id generation rules.
-func WithTopicMessageIdFn(msgId MsgIdFunction) TopicOpt {
-	return func(t *Topic) error {
-		t.p.idGen.Set(t.topic, msgId)
-		return nil
-	}
-}
 
 // Join joins the topic and returns a Topic handle. Only one Topic handle should exist per topic, and Join will error if
 // the Topic handle already exists.

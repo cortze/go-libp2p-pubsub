@@ -308,7 +308,7 @@ func (t *Topic) Publish(ctx context.Context, data []byte, opts ...PubOpt) error 
 		}
 	}
 
-	return t.p.val.PushLocal(&Message{m, "", t.p.host.ID(), nil, pub.local})
+	return t.p.val.PushLocal(&Message{m, "", time.Now(), t.p.host.ID(), nil, pub.local})
 }
 
 // WithReadiness returns a publishing option for only publishing when the router is ready.
